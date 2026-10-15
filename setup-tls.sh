@@ -33,11 +33,21 @@ echo "=== 2/4 Токен Cloudflare"
 if [ ! -s "$CF_INI" ]; then
   echo "Вставьте Cloudflare API-токен и нажмите Enter. Символы не отображаются:"
   read -rs CF_TOKEN; echo
+  # Веб-консоли оборачивают вставку в ESC[200~…ESC[201~ (bracketed paste) —
+  # убираем эти маркеры и пробелы, иначе Cloudflare ответит 6003.
+  CF_TOKEN="$(printf '%s' "$CF_TOKEN" | tr -d '\033' | sed 's/\[20[01]~//g' | tr -d '[:space:]')"
   [ -n "$CF_TOKEN" ] || die "токен пустой"
   install -d -m 700 /root/.secrets
   umask 077; printf 'dns_cloudflare_api_token = %s\n' "$CF_TOKEN" > "$CF_INI"; chmod 600 "$CF_INI"
   unset CF_TOKEN
 fi
+sed -i 's/\x1b//g; s/\[20[01]~//g; s/[[:space:]]*$//' "$CF_INI"
+if ! curl -s -m 20 -H "Authorization: Bearer $(sed 's/^.* = //' "$CF_INI")" \
+    https://api.cloudflare.com/client/v4/user/tokens/verify | grep -q '"status":"active"'; then
+  rm -f "$CF_INI"
+  die "Cloudflare не принял токен. Запустите скрипт ещё раз и вставьте API Token (не Global API Key)"
+fi
+echo "Токен Cloudflare принят."
 
 echo "=== 3/4 Выпуск сертификата (1–2 минуты)"
 certbot certonly --non-interactive --agree-tos -m admin@lyudi.app \
